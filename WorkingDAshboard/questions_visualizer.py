@@ -452,7 +452,7 @@ def finding_q_2_2(df, df_overall, params, pivot_rank, rank_diff):
             f"({peak_year}) to {int(trend[lead].iloc[-1])}; the others moved {others} ({FIRST}{ARROW}{LATEST}).")
 
 
-def _state_change(df_overall, y_old=LATEST - 1, y_new=LATEST):
+def _state_change(df_overall, y_old=FIRST, y_new=LATEST):
     c_old = _top100(df_overall, y_old)['State'].value_counts()
     c_new = _top100(df_overall, y_new)['State'].value_counts()
     change = c_new.sub(c_old, fill_value=0)
@@ -471,7 +471,7 @@ def plot_q_2_3(df, df_overall, params, pivot_rank, rank_diff):
     bars = plt.barh(change.index, change.values, color=colors, height=0.55)
     plt.gca().invert_yaxis()
     plt.axvline(0, color='#888888', linewidth=1)
-    plt.title('Change in Top-100 Institutions by State (2025 vs 2024)', fontsize=12, fontweight='bold', pad=10)
+    plt.title(f'Change in Top-100 Institutions by State ({FIRST} {ARROW} {LATEST})', fontsize=12, fontweight='bold', pad=10)
     plt.gca().xaxis.set_visible(False)
     sns.despine(left=True, bottom=True)
     lim = change.abs().max() + 1.6
@@ -490,11 +490,17 @@ def finding_q_2_3(df, df_overall, params, pivot_rank, rank_diff):
     gains, losses = change[change > 0], change[change < 0]
     g = ', '.join(f'{s} ({signed(v, ".0f")})' for s, v in gains.items()) or 'none'
     l = ', '.join(f'{s} ({signed(v, ".0f")})' for s, v in losses.iloc[::-1].items()) or 'none'
-    return f"From 2024 to 2025, Top-100 representation rose in {g}, and fell in {l}."
+    return f"From {FIRST} to {LATEST}, Top-100 representation rose in {g}, and fell in {l}."
 
 
 def _ka_tn(df_overall):
     return df_overall[(df_overall['Year'] == LATEST) & (df_overall['State'].isin(['Karnataka', 'Tamil Nadu']))].dropna(subset=['Rank_Num'])
+
+
+def _ka_tn_banded(df_overall):
+    """2025 institutions per state listed only in the 101–150 / 151–200 bands (no exact rank)."""
+    d = df_overall[(df_overall['Year'] == LATEST) & (df_overall['State'].isin(['Karnataka', 'Tamil Nadu']))]
+    return d[d['Rank_Num'].isna()].groupby('State').size().reindex(['Karnataka', 'Tamil Nadu'], fill_value=0)
 
 
 def plot_q_2_4(df, df_overall, params, pivot_rank, rank_diff):
@@ -502,13 +508,15 @@ def plot_q_2_4(df, df_overall, params, pivot_rank, rank_diff):
     d = _ka_tn(df_overall)
     order = ['Karnataka', 'Tamil Nadu']
     plt.figure(figsize=(7.5, 4.2))
-    sns.boxplot(data=d, x='State', y='Rank_Num', order=order, palette=['#9ecae1', '#fdd0a2'], width=0.4,
-                showfliers=False, medianprops=dict(color='#1d1d1f', linewidth=2))
-    sns.stripplot(data=d, x='State', y='Rank_Num', order=order, palette=['#1f77b4', '#e6550d'], size=6, jitter=0.08,
-                  edgecolor='white', linewidth=0.6)
+    sns.boxplot(data=d, x='State', y='Rank_Num', order=order, hue='State', hue_order=order, legend=False,
+                palette=['#9ecae1', '#fdd0a2'], width=0.4, showfliers=False,
+                medianprops=dict(color='#1d1d1f', linewidth=2))
+    sns.stripplot(data=d, x='State', y='Rank_Num', order=order, hue='State', hue_order=order, legend=False,
+                  palette=['#1f77b4', '#e6550d'], size=6, jitter=0.08, edgecolor='white', linewidth=0.6)
     ax = plt.gca()
     ax.invert_yaxis()
     ax.set_ylim(103, -2)
+    ax.set_yticks([1, 20, 40, 60, 80, 100])
     plt.title('Rank Comparison: Karnataka vs Tamil Nadu (2025 Overall)', fontsize=12, fontweight='bold', pad=12)
     plt.xlabel('')
     plt.ylabel('Rank (1 = Top)')
@@ -522,20 +530,35 @@ def plot_q_2_4(df, df_overall, params, pivot_rank, rank_diff):
                      bbox=dict(boxstyle='round,pad=0.25', facecolor='white', edgecolor='#cccccc'))
     ax.set_xticklabels([f"{s}\n(n = {(d['State'] == s).sum()})" for s in order])
     plt.xlim(-0.6, 1.9)
-    footnote('Each dot is one institution with an exact 2025 Top-100 rank. The line inside each box is the median.')
+    banded = _ka_tn_banded(df_overall)
+    footnote('Each dot is one institution with an exact 2025 Top-100 rank. The line inside each box is the median.\n'
+             f'Not shown (listed only in the 101–200 bands, no exact rank): Karnataka {banded["Karnataka"]}, '
+             f'Tamil Nadu {banded["Tamil Nadu"]}.')
     return plt.gcf()
 
 
 def finding_q_2_4(df, df_overall, params, pivot_rank, rank_diff):
     d = _ka_tn(df_overall)
-    out = []
+    out, stats = [], {}
     for s in ['Tamil Nadu', 'Karnataka']:
         x = d[d['State'] == s]
         best = x.loc[x['Rank_Num'].idxmin()]
-        out.append(f"{s} has {len(x)} institutions (median rank #{x['Rank_Num'].median():g}, best "
+        stats[s] = (len(x), x['Rank_Num'].median(), int(best['Rank_Num']))
+        out.append(f"{s} has {len(x)} institutions in the Top 100 (median rank #{x['Rank_Num'].median():g}, best "
                    f"{fname(best['Name'])} #{int(best['Rank_Num'])}, {int((x['Rank_Num'] <= 50).sum())} in the Top 50)")
-    return ('In 2025, ' + '; '.join(out) + '. Tamil Nadu wins on numbers, but both states have a similar typical rank, '
-            'and each has one of the top two institutions.')
+    (n_tn, med_tn, best_tn), (n_ka, med_ka, best_ka) = stats['Tamil Nadu'], stats['Karnataka']
+    more = 'Tamil Nadu' if n_tn > n_ka else 'Karnataka' if n_ka > n_tn else None
+    gap = abs(med_tn - med_ka)
+    if gap == 0:
+        med_txt = 'both states have the same median rank'
+    else:
+        better = 'Karnataka' if med_ka < med_tn else 'Tamil Nadu'
+        med_txt = f"{better} has the better median rank by {gap:g} places"
+    top_txt = (f"Tamil Nadu has the higher-ranked best institution (#{best_tn} vs #{best_ka})" if best_tn < best_ka
+               else f"Karnataka has the higher-ranked best institution (#{best_ka} vs #{best_tn})")
+    count_txt = (f"{more} has more Top-100 institutions ({max(n_tn, n_ka)} vs {min(n_tn, n_ka)})" if more
+                 else f"Both states have {n_tn} Top-100 institutions")
+    return f"In {LATEST}, " + '; '.join(out) + f". {count_txt}, {med_txt}, and {top_txt}."
 
 
 def _new_entrants(df_overall):
@@ -1177,25 +1200,43 @@ def _mobility(df_overall, y0=MOBILITY_FROM, y1=LATEST):
     return gained, m
 
 
-def plot_q_7_1(df, df_overall, params, pivot_rank, rank_diff):
+def _check_years(y0, y1):
+    if not (FIRST <= y0 < y1 <= LATEST):
+        raise ValueError(f'Choose two years with {FIRST} ≤ from < to ≤ {LATEST} (got {y0} → {y1}).')
+
+
+def plot_q_7_1(df, df_overall, params, pivot_rank, rank_diff, y0=MOBILITY_FROM, y1=LATEST):
     plt.close('all')
-    gained, m = _mobility(df_overall)
+    _check_years(y0, y1)
+    gained, m = _mobility(df_overall, y0, y1)
     plt.figure(figsize=(9, max(3.4, 0.5 * len(gained) + 1)))
+    title = f'Institutions Moving from Ranks 51–100 into the Top 50 ({len(gained)}) [{y0} {ARROW} {y1}]'
+    if gained.empty:
+        plt.title(title, fontsize=12, fontweight='bold', pad=10)
+        plt.text(0.5, 0.5, f'No institution moved from ranks 51–100 in {y0}\ninto the Top 50 in {y1}.',
+                 ha='center', va='center', fontsize=11, color='#6e6e73', transform=plt.gca().transAxes)
+        plt.axis('off')
+        return plt.gcf()
     bars = _barh(gained.index, gained.values, 'Greens_r', len(gained))
-    plt.title(f'Institutions Moving from Ranks 51–100 into the Top 50 ({len(gained)}) [{MOBILITY_FROM} → {LATEST}]',
-              fontsize=12, fontweight='bold', pad=10)
+    plt.title(title, fontsize=12, fontweight='bold', pad=10)
     for b, name in zip(bars, gained.index):
-        plt.text(b.get_width() + 0.5, b.get_y() + b.get_height() / 2, move_label(m.at[name, MOBILITY_FROM], m.at[name, LATEST]),
+        plt.text(b.get_width() + 0.5, b.get_y() + b.get_height() / 2, move_label(m.at[name, y0], m.at[name, y1]),
                  va='center', fontweight='bold', color='#1b5e20')
     plt.xlim(0, gained.max() * 1.6)
-    footnote(f'{MOBILITY_FROM}–2025 window avoids the COVID-affected 2020–2022 editions. ' + TIE_NOTE)
+    covid = (f'{MOBILITY_FROM}–{LATEST} window avoids the COVID-affected 2020–2022 editions. '
+             if (y0, y1) == (MOBILITY_FROM, LATEST) else '')
+    footnote(covid + 'Bar length = ranks gained. ' + TIE_NOTE)
     return plt.gcf()
 
 
-def finding_q_7_1(df, df_overall, params, pivot_rank, rank_diff):
-    gained, m = _mobility(df_overall)
-    parts = [f"{fname(n)} ({move_label(m.at[n, MOBILITY_FROM], m.at[n, LATEST], False)})" for n in gained.index]
-    return f"Between {MOBILITY_FROM} and {LATEST}, {len(gained)} institutions moved from the 51–100 band into the Top 50: " + '; '.join(parts) + '.'
+def finding_q_7_1(df, df_overall, params, pivot_rank, rank_diff, y0=MOBILITY_FROM, y1=LATEST):
+    _check_years(y0, y1)
+    gained, m = _mobility(df_overall, y0, y1)
+    if gained.empty:
+        return f"Between {y0} and {y1}, no institution moved from the 51–100 band into the Top 50."
+    parts = [f"{fname(n)} ({move_label(m.at[n, y0], m.at[n, y1], False)})" for n in gained.index]
+    noun = 'institution' if len(gained) == 1 else 'institutions'
+    return f"Between {y0} and {y1}, {len(gained)} {noun} moved from the 51–100 band into the Top 50: " + '; '.join(parts) + '.'
 
 
 def _turnover(df_overall):
@@ -1537,6 +1578,9 @@ NOTES = {
             "We therefore read the question as 'the mean score of each year's Top-100'. To check whether the change "
             "is real and not just a different set of institutions, we also plot a fixed cohort: the institutions that "
             "were in the Top-100 in all nine editions."),
+    "2.3": ("'Over time' is measured across the full period: for each state we compare its number of Top-100 "
+            "institutions in the first edition (2017) with the latest (2025). Bars show the net change, and the "
+            "counts in brackets are 2017 → 2025. The year-by-year trend for the leading states is in Q2.2."),
     "3.2": ("Each year has exactly one institution per rank 1–100 plus 50 in each of the 101–150 and 151–200 "
             "bands, so a single year's rank distribution is the same every time. Instead we take every institution "
             "that appeared between 2017 and 2025 and count it in the best tier it ever reached. This shows how many "
@@ -1547,8 +1591,8 @@ NOTES = {
     "5.2": ("RPC averages about 36 pts and TLR about 64 pts, so in raw points almost every institution looks "
             "'better at teaching'. 'Relatively low teaching' is measured as the gap between an institution's "
             "percentile rank in RPC and its percentile rank in TLR (2025 Top-100). Raw-point gaps are covered in Q8.2."),
-    "5.3": ("Perception is near zero for many institutions, so raw TLR − Perception just lists the lowest-perception "
-            "institutions. We keep institutions with high teaching scores (TLR at or above the 2025 median) and rank them by "
+    "5.3": ("Perception is scored far lower than TLR (2025 Top-100 median about 18 vs about 70, and a quarter of "
+            "institutions score under 10), so raw TLR − Perception just lists the lowest-perception institutions. We keep institutions with high teaching scores (TLR at or above the 2025 median) and rank them by "
             "TLR percentile − Perception percentile."),
     "7.3": ("Rank bands are 1–10, 11–25, 26–50, 51–100 (exact ranks grouped) and NIRF's own 101–150 and "
             "151–200 bands. For each pair of consecutive years we take institutions listed in both years and count "

@@ -49,12 +49,21 @@ def question_png(qid):
 
 
 @st.cache_data(show_spinner=False)
-def question_finding(qid, institution=None):
-    """Finding text computed from the same data the chart uses (Q1.1 follows the chosen institution)."""
+def mobility_png(y0, y1):
+    """Q7.1 is interactive: 51–100 → Top 50 movers between two chosen years."""
+    _apply_chart_style()
+    return _to_png(qv.plot_q_7_1(*data.get_data(), y0=y0, y1=y1))
+
+
+@st.cache_data(show_spinner=False)
+def question_finding(qid, institution=None, years=None):
+    """Finding text computed from the same data the chart uses (Q1.1 / Q7.1 follow the user's selection)."""
     fn = CATALOG[qid]["finding_fn"]
     try:
         if qid == "1.1" and institution:
             return fn(*data.get_data(), name=institution)
+        if qid == "7.1" and years:
+            return fn(*data.get_data(), y0=years[0], y1=years[1])
         return fn(*data.get_data())
     except Exception as e:  # never break the page because a sentence could not be built
         return f"Finding unavailable ({e})."
@@ -152,7 +161,7 @@ with view_col:
             if q.get("note"):
                 ui.insight(q["note"], label="How we read this question")
 
-            inst = None
+            inst, years = None, None
             if qid == "1.1":
                 names = sorted(df_overall["Name"].dropna().unique())
                 if st.session_state.get("ax_inst") not in names:
@@ -160,6 +169,25 @@ with view_col:
                 inst = st.selectbox("Institution", names, key="ax_inst",
                                     help="Pick any institution to see its Overall rank history")
                 png = institution_trend_png(inst)
+            elif qid == "7.1":
+                all_years = list(range(qv.FIRST, qv.LATEST + 1))
+                yc1, yc2 = st.columns(2)
+                from_opts = all_years[:-1]
+                if st.session_state.get("ax_y0") not in from_opts:
+                    st.session_state["ax_y0"] = qv.MOBILITY_FROM
+                y0 = yc1.selectbox("From year", from_opts, key="ax_y0",
+                                   help="Year in which the institution was ranked 51–100")
+                to_opts = [y for y in all_years if y > y0]
+                if st.session_state.get("ax_y1") not in to_opts:
+                    st.session_state["ax_y1"] = qv.LATEST
+                y1 = yc2.selectbox("To year", to_opts, key="ax_y1",
+                                   help="Year in which the institution reached the Top 50")
+                years = (y0, y1)
+                try:
+                    png = mobility_png(y0, y1)
+                except Exception as e:
+                    png = None
+                    st.error(f"This chart could not be drawn: {e}")
             else:
                 try:
                     with st.spinner("Drawing chart…"):
@@ -170,7 +198,7 @@ with view_col:
             if png:
                 st.image(png, width="stretch")
 
-            ui.insight(question_finding(qid, inst))
+            ui.insight(question_finding(qid, inst, years))
 
             st.write("")
             b1, _, b2 = st.columns([1, 2, 1])
